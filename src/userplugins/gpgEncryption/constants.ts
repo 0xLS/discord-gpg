@@ -28,4 +28,4 @@ export const DATA_KEY_IDENTITY = "GpgEncryption_Identity";
 export const DATA_KEY_CHANNEL_IDENTITIES = "GpgEncryption_ChannelIdentities";
 export const DATA_KEY_PEER_KEYS = "GpgEncryption_PeerKeys";
 export const DATA_KEY_ANNOUNCED_TO = "GpgEncryption_AnnouncedTo";
-export const DATA_KEY_DISABLED_CHANNELS = "GpgEncryption_DisabledChannels";
+export const DATA_KEY_ENABLED_CHANNELS = "GpgEncryption_EnabledChannels";

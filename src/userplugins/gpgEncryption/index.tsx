@@ -69,6 +69,7 @@ function onMessageCreate({ message }: { message: Message; }) {
 
     const channel = ChannelStore.getChannel(message.channel_id);
     if (!isOneOnOneDMChannel(channel)) return;
+    if (!store.isChannelEnabled(message.channel_id)) return;
 
     const armoredPublicKey = message.content.slice(KEY_ANNOUNCE_PREFIX.length).trim();
     handleIncomingKeyAnnouncement(message.channel_id, message.author.id, armoredPublicKey);
@@ -100,7 +101,7 @@ export default definePlugin({
         if (!settings.store.enabled) return;
         if (!message.content) return;
         if (message.content.startsWith(ENCRYPTED_PREFIX) || message.content.startsWith(KEY_ANNOUNCE_PREFIX)) return;
-        if (store.isChannelDisabled(channelId)) return;
+        if (!store.isChannelEnabled(channelId)) return;
 
         const channel = ChannelStore.getChannel(channelId);
         if (!isOneOnOneDMChannel(channel)) return;
@@ -127,20 +128,21 @@ export default definePlugin({
     commands: [
         {
             name: "gpg-share-key",
-            description: "(Re)send your GPG public key to this DM",
+            description: "(Re)send your GPG public key to this DM and enable encryption here",
             inputType: ApplicationCommandInputType.BUILT_IN,
             async execute(_, ctx) {
                 const { channel } = ctx;
                 if (!isOneOnOneDMChannel(channel)) {
                     return void sendBotMessage(ctx.channel.id, { content: "This only works in a 1:1 DM." });
                 }
+                await store.setChannelEnabled(channel.id, true);
                 await announcePublicKey(channel.id, channel.recipients[0]);
-                sendBotMessage(ctx.channel.id, { content: "Sent your GPG public key to this chat." });
+                sendBotMessage(ctx.channel.id, { content: "Sent your GPG public key to this chat and enabled encryption here." });
             }
         },
         {
             name: "gpg-new-chat-key",
-            description: "Generate a GPG keypair unique to this DM, instead of your shared identity key",
+            description: "Generate a GPG keypair unique to this DM and enable encryption here",
             inputType: ApplicationCommandInputType.BUILT_IN,
             async execute(_, ctx) {
                 const { channel } = ctx;
@@ -150,27 +152,28 @@ export default definePlugin({
                 const recipientId = channel.recipients[0];
                 const keyPair = await store.setChannelIdentity(channel.id, `Vencord GPG Encryption <chat:${channel.id}>`);
                 await store.forgetAnnouncedTo(recipientId);
+                await store.setChannelEnabled(channel.id, true);
                 await announcePublicKey(channel.id, recipientId);
-                sendBotMessage(ctx.channel.id, { content: `Generated a new key for this chat (fingerprint ${keyPair.fingerprint}) and shared it.` });
+                sendBotMessage(ctx.channel.id, { content: `Generated a new key for this chat (fingerprint ${keyPair.fingerprint}), shared it, and enabled encryption here.` });
             }
         },
         {
             name: "gpg-use-shared-key",
-            description: "Stop using a per-chat key here and go back to your shared identity key",
+            description: "Use your shared identity key here (instead of a per-chat key) and enable encryption",
             inputType: ApplicationCommandInputType.BUILT_IN,
             async execute(_, ctx) {
                 const { channel } = ctx;
                 if (!isOneOnOneDMChannel(channel)) {
                     return void sendBotMessage(ctx.channel.id, { content: "This only works in a 1:1 DM." });
                 }
-                if (!store.hasChannelOverride(channel.id)) {
-                    return void sendBotMessage(ctx.channel.id, { content: "This chat is already using your shared identity key." });
-                }
                 const recipientId = channel.recipients[0];
-                await store.clearChannelIdentity(channel.id);
-                await store.forgetAnnouncedTo(recipientId);
+                if (store.hasChannelOverride(channel.id)) {
+                    await store.clearChannelIdentity(channel.id);
+                    await store.forgetAnnouncedTo(recipientId);
+                }
+                await store.setChannelEnabled(channel.id, true);
                 await announcePublicKey(channel.id, recipientId);
-                sendBotMessage(ctx.channel.id, { content: "Switched back to your shared identity key and shared it." });
+                sendBotMessage(ctx.channel.id, { content: "Using your shared identity key here, shared it, and enabled encryption for this chat." });
             }
         },
         {
@@ -182,12 +185,18 @@ export default definePlugin({
                 if (!isOneOnOneDMChannel(channel)) {
                     return void sendBotMessage(ctx.channel.id, { content: "This only works in a 1:1 DM." });
                 }
-                const disabled = !store.isChannelDisabled(channel.id);
-                await store.setChannelDisabled(channel.id, disabled);
+                const recipientId = channel.recipients[0];
+                const enabling = !store.isChannelEnabled(channel.id);
+                await store.setChannelEnabled(channel.id, enabling);
+
+                if (enabling && !store.getPeerKey(recipientId) && !store.hasAnnouncedTo(recipientId)) {
+                    await announcePublicKey(channel.id, recipientId);
+                }
+
                 sendBotMessage(ctx.channel.id, {
-                    content: disabled
-                        ? "GPG encryption is now **disabled** for this chat. Messages will be sent as plaintext."
-                        : "GPG encryption is now **enabled** for this chat."
+                    content: enabling
+                        ? "GPG encryption is now **enabled** for this chat."
+                        : "GPG encryption is now **disabled** for this chat. Messages will be sent as plaintext."
                 });
             }
         },
@@ -206,13 +215,25 @@ export default definePlugin({
                 const usingChatKey = store.hasChannelOverride(channel.id);
 
                 const lines = [
-                    `Encryption: **${settings.store.enabled && !store.isChannelDisabled(channel.id) ? "enabled" : "disabled"}**`,
+                    `Encryption: **${settings.store.enabled && store.isChannelEnabled(channel.id) ? "enabled" : "disabled"}** for this chat`,
                     `Your key for this chat: \`${identity.fingerprint}\` (${usingChatKey ? "per-chat key" : "shared identity key"})`,
                     peerKey
                         ? `Their key: \`${peerKey.fingerprint}\``
-                        : "Their key: none yet — send a message to trigger the automatic key exchange."
+                        : "Their key: none yet — enable encryption to trigger the automatic key exchange."
                 ];
                 sendBotMessage(ctx.channel.id, { content: lines.join("\n") });
+            }
+        },
+        {
+            name: "gpg-delete-all",
+            description: "Wipe ALL locally stored GPG keys (your identity, per-chat keys, and every contact's key) — irreversible",
+            inputType: ApplicationCommandInputType.BUILT_IN,
+            async execute(_, ctx) {
+                const me = UserStore.getCurrentUser();
+                await store.wipeAll(`Vencord GPG Encryption <${me?.id ?? "unknown"}>`);
+                sendBotMessage(ctx.channel.id, {
+                    content: "Deleted all stored GPG keys and generated a fresh identity. Encryption is disabled for every chat again until you re-enable it — you will need to re-exchange keys with everyone."
+                });
             }
         }
     ]

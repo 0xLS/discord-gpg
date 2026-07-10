@@ -21,7 +21,7 @@ import * as DataStore from "@api/DataStore";
 import {
     DATA_KEY_ANNOUNCED_TO,
     DATA_KEY_CHANNEL_IDENTITIES,
-    DATA_KEY_DISABLED_CHANNELS,
+    DATA_KEY_ENABLED_CHANNELS,
     DATA_KEY_IDENTITY,
     DATA_KEY_PEER_KEYS
 } from "./constants";
@@ -36,16 +36,18 @@ let identity: KeyPair | undefined;
 let channelIdentities: Record<string, KeyPair> = {};
 let peerKeys: Record<string, PeerKey> = {};
 let announcedTo: string[] = [];
-let disabledChannels: string[] = [];
+// Opt-in list: encryption is off for every chat by default, and only turned on
+// via /gpg-toggle or by explicitly generating/using a key for that chat.
+let enabledChannels: string[] = [];
 
 export async function init(defaultIdentityLabel: string) {
-    [identity, channelIdentities, peerKeys, announcedTo, disabledChannels] = await Promise.all([
+    [identity, channelIdentities, peerKeys, announcedTo, enabledChannels] = await Promise.all([
         DataStore.get<KeyPair>(DATA_KEY_IDENTITY),
         DataStore.get<Record<string, KeyPair>>(DATA_KEY_CHANNEL_IDENTITIES),
         DataStore.get<Record<string, PeerKey>>(DATA_KEY_PEER_KEYS),
         DataStore.get<string[]>(DATA_KEY_ANNOUNCED_TO),
-        DataStore.get<string[]>(DATA_KEY_DISABLED_CHANNELS)
-    ]).then(([id, ci, pk, at, dc]) => [id, ci ?? {}, pk ?? {}, at ?? [], dc ?? []] as const);
+        DataStore.get<string[]>(DATA_KEY_ENABLED_CHANNELS)
+    ]).then(([id, ci, pk, at, ec]) => [id, ci ?? {}, pk ?? {}, at ?? [], ec ?? []] as const);
 
     if (!identity) {
         identity = await generateIdentity(defaultIdentityLabel);
@@ -111,15 +113,34 @@ export async function forgetAnnouncedTo(userId: string) {
     await DataStore.set(DATA_KEY_ANNOUNCED_TO, announcedTo);
 }
 
-export function isChannelDisabled(channelId: string): boolean {
-    return disabledChannels.includes(channelId);
+export function isChannelEnabled(channelId: string): boolean {
+    return enabledChannels.includes(channelId);
 }
 
-export async function setChannelDisabled(channelId: string, disabled: boolean) {
-    const isDisabled = disabledChannels.includes(channelId);
-    if (disabled === isDisabled) return;
-    disabledChannels = disabled
-        ? [...disabledChannels, channelId]
-        : disabledChannels.filter(id => id !== channelId);
-    await DataStore.set(DATA_KEY_DISABLED_CHANNELS, disabledChannels);
+export async function setChannelEnabled(channelId: string, enabled: boolean) {
+    const isEnabled = enabledChannels.includes(channelId);
+    if (enabled === isEnabled) return;
+    enabledChannels = enabled
+        ? [...enabledChannels, channelId]
+        : enabledChannels.filter(id => id !== channelId);
+    await DataStore.set(DATA_KEY_ENABLED_CHANNELS, enabledChannels);
+}
+
+export async function wipeAll(defaultIdentityLabel: string) {
+    identity = undefined;
+    channelIdentities = {};
+    peerKeys = {};
+    announcedTo = [];
+    enabledChannels = [];
+
+    await DataStore.delMany([
+        DATA_KEY_IDENTITY,
+        DATA_KEY_CHANNEL_IDENTITIES,
+        DATA_KEY_PEER_KEYS,
+        DATA_KEY_ANNOUNCED_TO,
+        DATA_KEY_ENABLED_CHANNELS
+    ]);
+
+    identity = await generateIdentity(defaultIdentityLabel);
+    await DataStore.set(DATA_KEY_IDENTITY, identity);
 }
