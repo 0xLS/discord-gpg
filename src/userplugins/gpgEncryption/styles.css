@@ -7,8 +7,12 @@
 }
 
 .vc-gpg-decrypted {
-    color: var(--text-normal);
+    color: #060607 !important;
     font-style: normal;
+}
+
+.theme-dark .vc-gpg-decrypted {
+    color: #fff !important;
 }
 
 .vc-gpg-key {
