@@ -5,6 +5,9 @@
 
 The cutest Discord client mod
 
+## To Build
+https://docs.vencord.dev/installing/
+
 ![](https://github.com/user-attachments/assets/3fac98c0-c411-4d2a-97a3-13b7da8687a2)
 
 ## Features
