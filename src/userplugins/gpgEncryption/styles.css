@@ -1,0 +1,25 @@
+.vc-gpg-accessory {
+    display: block;
+    margin-top: 0.25em;
+    color: var(--text-muted);
+    font-style: italic;
+    white-space: pre-wrap;
+}
+
+.vc-gpg-decrypted {
+    color: var(--text-normal);
+    font-style: normal;
+}
+
+.vc-gpg-key {
+    color: var(--text-positive);
+}
+
+.vc-gpg-error {
+    color: var(--text-danger);
+}
+
+.vc-gpg-verified {
+    color: var(--text-positive);
+    font-size: 0.8em;
+}
