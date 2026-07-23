@@ -51,9 +51,16 @@ async function announcePublicKey(channelId: string, recipientId: string) {
 async function handleIncomingKeyAnnouncement(channelId: string, authorId: string, armoredPublicKey: string) {
     try {
         const fingerprint = await getFingerprint(armoredPublicKey);
+        // Always cache a peer's key when we see one, even if encryption isn't
+        // enabled on our side yet for this chat — this is just local storage,
+        // it doesn't send anything or turn encryption on by itself. Without
+        // this, enabling encryption later would have no way to recover a key
+        // that was announced to us while we had this chat toggled off.
         await store.setPeerKey(authorId, { publicKey: armoredPublicKey, fingerprint });
 
-        if (!store.hasAnnouncedTo(authorId)) {
+        // Only reciprocate (send our own key back) if we've actually opted
+        // this chat into encryption ourselves.
+        if (store.isChannelEnabled(channelId) && !store.hasAnnouncedTo(authorId)) {
             await announcePublicKey(channelId, authorId);
         }
     } catch (e) {
@@ -69,7 +76,6 @@ function onMessageCreate({ message }: { message: Message; }) {
 
     const channel = ChannelStore.getChannel(message.channel_id);
     if (!isOneOnOneDMChannel(channel)) return;
-    if (!store.isChannelEnabled(message.channel_id)) return;
 
     const armoredPublicKey = message.content.slice(KEY_ANNOUNCE_PREFIX.length).trim();
     handleIncomingKeyAnnouncement(message.channel_id, message.author.id, armoredPublicKey);
@@ -189,7 +195,7 @@ export default definePlugin({
                 const enabling = !store.isChannelEnabled(channel.id);
                 await store.setChannelEnabled(channel.id, enabling);
 
-                if (enabling && !store.getPeerKey(recipientId) && !store.hasAnnouncedTo(recipientId)) {
+                if (enabling && !store.hasAnnouncedTo(recipientId)) {
                     await announcePublicKey(channel.id, recipientId);
                 }
 
